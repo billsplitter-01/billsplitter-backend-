@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: billsplitter-api
+    env: node
+    buildCommand: npm install && npx prisma generate
+    startCommand: npm start
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRES_IN
+        value: 5m
+      - key: NODE_VERSION
+        value: 20
