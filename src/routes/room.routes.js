@@ -23,6 +23,9 @@ router.get("/", authMiddleware, roleGuard(["APP_ADMIN"]), roomController.getAllR
 // Delete Room - App Admin only
 router.delete("/:roomId", authMiddleware, roleGuard(["APP_ADMIN"]), roomController.deleteRoom);
 
+// Secure Delete Room - Room Admin only (requires password)
+router.post("/:roomId/delete-secure", authMiddleware, roomController.deleteRoomByAdmin);
+
 // Member Routes
 const memberController = require("../controllers/member.controller");
 router.post("/:roomId/members", authMiddleware, memberController.addMember);

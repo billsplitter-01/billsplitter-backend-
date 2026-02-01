@@ -23,16 +23,22 @@ exports.addMember = async (req, res, next) => {
         const admin = await prisma.user.findUnique({ where: { id: adminId } });
         const adminName = admin ? admin.name : "Admin";
 
-        // Check if user is already a member of ANY room
+        // Check if user is already associated with ANY room (One Room Per User)
         if (user) {
-            const existingMembership = await prisma.roomMember.findFirst({
-                where: { userId: user.id },
-                include: { room: true }
-            });
+            const [membership, adminRoom] = await Promise.all([
+                prisma.roomMember.findFirst({
+                    where: { userId: user.id },
+                    include: { room: true }
+                }),
+                prisma.room.findFirst({
+                    where: { adminId: user.id }
+                })
+            ]);
 
-            if (existingMembership) {
+            if (membership || adminRoom) {
+                const roomTitle = membership ? membership.room.title : adminRoom.title;
                 return res.status(409).json({
-                    message: `This user is already a member of "${existingMembership.room.title}". Users can only be in one room at a time.`
+                    message: `This user is already associated with room "${roomTitle}". Every user can only manage or belong to one room at a time.`
                 });
             }
         }

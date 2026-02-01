@@ -1,43 +1,59 @@
-require("dotenv").config();
+const cluster = require("cluster");
+const os = require("os");
 const express = require("express");
 const cors = require("cors");
+require("dotenv").config();
 const authRoutes = require("./routes/auth.routes");
 const compression = require("compression");
 
-const app = express();
-const PORT = process.env.PORT || 3000;
+const numCPUs = os.cpus().length;
 
-app.use(compression());
-app.use(cors());
-app.use(express.json());
+if (cluster.isPrimary) {
+    console.log(`Primary ${process.pid} is running`);
 
-app.use((req, res, next) => {
-    console.log(`[REQUEST] ${req.method} ${req.url}`);
-    next();
-});
+    // Fork workers.
+    for (let i = 0; i < numCPUs; i++) {
+        cluster.fork();
+    }
 
-// Health Check
-app.get("/health", (req, res) => {
-    res.send("OK");
-});
+    cluster.on("exit", (worker, code, signal) => {
+        console.log(`worker ${worker.process.pid} died`);
+        console.log("Starting a new worker...");
+        cluster.fork();
+    });
+} else {
+    const app = express();
+    const PORT = process.env.PORT || 3000;
 
-// Routes
-app.use("/api/auth", authRoutes);
-app.use("/api/rooms", require("./routes/room.routes"));
-app.use("/api/admin", require("./routes/admin.routes"));
-app.use("/api/users", require("./routes/user.routes"));
-app.use("/api/notifications", require("./routes/notification.routes"));
+    app.use(compression());
+    app.use(cors());
+    app.use(express.json());
 
-// Global Error Handler
-app.use((err, req, res, next) => {
-    console.error(err.stack);
-    res.status(500).json({ message: "Internal Server Error" });
-});
+    app.use((req, res, next) => {
+        console.log(`[REQUEST] ${req.method} ${req.url} handled by worker ${process.pid}`);
+        next();
+    });
 
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT} (PID: ${process.pid})`);
-});
+    // Health Check
+    app.get("/health", (req, res) => {
+        res.send(`OK from worker ${process.pid}`);
+    });
 
-setInterval(() => {
-    // Keep process alive
-}, 10000);
+    // Routes
+    app.use("/api/auth", authRoutes);
+    app.use("/api/rooms", require("./routes/room.routes"));
+    app.use("/api/admin", require("./routes/admin.routes"));
+    app.use("/api/users", require("./routes/user.routes"));
+    app.use("/api/notifications", require("./routes/notification.routes"));
+    app.use("/api/feedback", require("./routes/feedback.routes"));
+
+    // Global Error Handler
+    app.use((err, req, res, next) => {
+        console.error(err.stack);
+        res.status(500).json({ message: "Internal Server Error" });
+    });
+
+    app.listen(PORT, () => {
+        console.log(`Worker ${process.pid} started on port ${PORT}`);
+    });
+}

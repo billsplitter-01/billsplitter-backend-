@@ -13,5 +13,6 @@ router.get('/stats', adminController.getStats);
 router.get('/rooms', adminController.getAllRooms);
 router.patch('/rooms/:roomId/ban', adminController.banRoom);
 router.delete('/rooms/:roomId', adminController.deleteRoom);
+router.delete('/rooms/:roomId/members/:userId', adminController.removeMemberFromRoom);
 
 module.exports = router;

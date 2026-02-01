@@ -10,14 +10,28 @@ exports.register = async (req, res, next) => {
 
         const { name, email, password, roomName } = req.body;
 
-        const existingUser = await prisma.user.findUnique({ where: { email } });
-        if (existingUser)
+        const existingUser = await prisma.user.findUnique({
+            where: { email },
+            include: {
+                roomsCreated: { select: { id: true } },
+                memberships: { select: { id: true } }
+            }
+        });
+
+        if (existingUser) {
+            // Check if they are already associated with any room
+            if (existingUser.roomsCreated.length > 0 || existingUser.memberships.length > 0) {
+                return res.status(409).json({
+                    message: "User is already associated with a room. One account can only manage or join one room at a time."
+                });
+            }
             return res.status(409).json({ message: "Email already registered" });
+        }
 
         // Check Room Name uniqueness if provided
         if (roomName) {
-            const existingRoom = await prisma.room.findUnique({ where: { title: roomName } });
-            if (existingRoom) {
+            const existingRoomName = await prisma.room.findUnique({ where: { title: roomName } });
+            if (existingRoomName) {
                 return res.status(409).json({ message: "Room name already taken. Please choose another." });
             }
         }
@@ -192,6 +206,33 @@ exports.acceptInvite = async (req, res, next) => {
             user: { id: user.id, name: user.name, role: user.role }
         });
 
+    } catch (err) {
+        next(err);
+    }
+};
+
+exports.forgotPassword = async (req, res, next) => {
+    try {
+        const { email } = req.body;
+        if (!email) return res.status(400).json({ message: "Email is required" });
+
+        const user = await prisma.user.findUnique({ where: { email } });
+        if (!user) return res.status(400).json({ message: "this mail not registed" });
+
+        // Generate a random 10-character alphanumeric password
+        const tempPassword = Math.random().toString(36).slice(-10);
+        const hashedPassword = await bcrypt.hash(tempPassword, 10);
+
+        await prisma.user.update({
+            where: { id: user.id },
+            data: { passwordHash: hashedPassword }
+        });
+
+        // Use the email service to send the password
+        const emailService = require("../services/email.service");
+        await emailService.sendPasswordRecoveryEmail(email, tempPassword, user.name);
+
+        return res.status(200).json({ message: "sent password to your mail" });
     } catch (err) {
         next(err);
     }

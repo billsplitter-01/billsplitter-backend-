@@ -18,10 +18,22 @@ exports.createRoom = async (req, res, next) => {
             return res.status(409).json({ message: "Room name already exists. Please choose a unique name." });
         }
 
-        // Check if user already owns a room (One Room Per Admin)
+        // Check if user is already associated with ANY room (One Room Per User)
+        const existingAssociation = await prisma.roomMember.findFirst({
+            where: { userId: adminId },
+            include: { room: true }
+        });
+
+        if (existingAssociation) {
+            return res.status(400).json({
+                message: `You are already associated with room "${existingAssociation.room.title}". One account can only manage or join one room at a time.`
+            });
+        }
+
+        // Double check admin ownership just in case (though members check should cover it)
         const existingAdminRoom = await prisma.room.findFirst({ where: { adminId: adminId } });
         if (existingAdminRoom) {
-            return res.status(400).json({ message: "You can only create ONE room. You are already an admin of a room." });
+            return res.status(400).json({ message: "You are already an admin of a room." });
         }
 
         const room = await prisma.room.create({
@@ -315,6 +327,54 @@ exports.notifyMembers = async (req, res, next) => {
         }
 
         return res.status(200).json({ message: "Emails sent to all members" });
+    } catch (err) {
+        next(err);
+    }
+};
+
+exports.deleteRoomByAdmin = async (req, res, next) => {
+    try {
+        const { roomId } = req.params;
+        const { password } = req.body;
+        const adminId = req.user.userId;
+
+        if (!password) {
+            return res.status(400).json({ message: "Password is required to delete the room." });
+        }
+
+        // 1. Fetch Room and Admin
+        const room = await prisma.room.findUnique({
+            where: { id: parseInt(roomId) },
+            include: { admin: true }
+        });
+
+        if (!room) return res.status(404).json({ message: "Room not found" });
+
+        // 2. Verify Authorization (Only the specific admin can delete)
+        if (room.adminId !== adminId) {
+            return res.status(403).json({ message: "Only the room admin can delete this room." });
+        }
+
+        // 3. Verify Password
+        const bcrypt = require("bcryptjs");
+        const isMatch = await bcrypt.compare(password, room.admin.passwordHash);
+        if (!isMatch) {
+            return res.status(401).json({ message: "Incorrect password. Room deletion aborted." });
+        }
+
+        // 4. Perform Transactional Cleanup
+        await prisma.$transaction([
+            prisma.roomMember.deleteMany({ where: { roomId: room.id } }),
+            prisma.expense.deleteMany({ where: { roomId: room.id } }),
+            prisma.expenseCycle.deleteMany({ where: { roomId: room.id } }),
+            prisma.message.deleteMany({ where: { roomId: room.id } }),
+            prisma.feedback.deleteMany({ where: { roomId: room.id } }), // Delete Feedbacks
+            prisma.notification.deleteMany({ where: { userId: room.adminId } }), // Clean notifications for admin
+            prisma.room.delete({ where: { id: room.id } }),
+            prisma.user.delete({ where: { id: room.adminId } }) // Delete Admin Account
+        ]);
+
+        return res.status(200).json({ message: "Room and Admin Account permanently deleted." });
     } catch (err) {
         next(err);
     }

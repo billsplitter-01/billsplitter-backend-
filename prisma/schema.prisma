@@ -38,6 +38,7 @@ model User {
   expensesAdded Expense[]
   passwordResetTokens PasswordResetToken[]
   notifications Notification[]
+  feedbacks     Feedback[]
 
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
@@ -55,6 +56,7 @@ model Room {
   cycles        ExpenseCycle[]
   expenses      Expense[]
   messages      Message[]
+  feedbacks     Feedback[]
   
   @@index([adminId])
 
@@ -158,4 +160,36 @@ model Notification {
   isRead    Boolean  @default(false)
   type      String   @default("INFO") // INFO, WARNING, SUCCESS
   createdAt DateTime @default(now())
+}
+
+enum FeedbackType {
+  PROBLEM
+  FEATURE_REQUEST
+  GENERAL
+}
+
+enum FeedbackStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  REJECTED
+}
+
+model Feedback {
+  id          Int            @id @default(autoincrement())
+  userId      Int
+  roomId      Int?
+  type        FeedbackType
+  title       String
+  description String         @db.Text
+  status      FeedbackStatus @default(OPEN)
+
+  user        User           @relation(fields: [userId], references: [id])
+  room        Room?          @relation(fields: [roomId], references: [id])
+
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@index([userId])
+  @@index([roomId])
 }

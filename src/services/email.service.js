@@ -97,7 +97,7 @@ exports.sendManualEmail = async (to, roomName, subject, content, adminName) => {
 
 exports.sendInviteEmail = async (to, roomName, adminName, inviteToken) => {
     const subject = `You're invited to join ${roomName} on SplitApp`;
-    const link = `http://localhost:5173/accept-invite?token=${inviteToken}`;
+    const link = `https://billssplitter-vivasvan.netlify.app/accept-invite?token=${inviteToken}`;
 
     const body = `
         <h2>Join Your Roommates! 👋</h2>
@@ -143,13 +143,41 @@ exports.sendWelcomeEmail = async (to, roomName, adminName, email, password) => {
         <p>You can now log in to view expenses and settle up.</p>
         
         <div style="text-align: center;">
-            <a href="http://localhost:5173/login" class="button">Login to Dashboard</a>
+            <a href="https://billssplitter-vivasvan.netlify.app/login" class="button">Login to Dashboard</a>
         </div>
 
         <p>Best Regards,<br><strong>SplitApp Team</strong></p>
     `;
 
     const html = getHtmlTemplate("Welcome", body, "#8b5cf6"); // Violet accent
+    await this.sendEmail(to, subject, null, html);
+};
+
+exports.sendPasswordRecoveryEmail = async (to, password, userName) => {
+    const subject = "SplitApp - Password Recovery";
+
+    const body = `
+        <h2>Secure Password Recovery 🔐</h2>
+        <p>Hello ${userName || 'User'},</p>
+        <p>You recently requested to recover your password for your SplitApp account.</p>
+        
+        <div class="info-box">
+            <h3 style="margin-top:0; margin-bottom:10px; font-size: 16px;">New Temporary Password</h3>
+            <p style="margin:0;"><strong>Temporary Password:</strong> <span style="font-family: monospace; font-size: 18px; color: #1e293b; background: #f1f5f9; padding: 2px 6px; border-radius: 4px;">${password}</span></p>
+        </div>
+        
+        <p>For your security, please log in using this password and **change it immediately** in your profile settings.</p>
+        
+        <div style="text-align: center;">
+            <a href="https://billssplitter-vivasvan.netlify.app/login" class="button">Login to Dashboard</a>
+        </div>
+
+        <p>If you did not request this, please ignore this email or contact support if you have concerns.</p>
+        
+        <p>Best Regards,<br><strong>SplitApp Team</strong></p>
+    `;
+
+    const html = getHtmlTemplate("Password Recovery", body, "#3B82F6"); // Blue accent
     await this.sendEmail(to, subject, null, html);
 };
 
