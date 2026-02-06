@@ -1,5 +1,6 @@
 const prisma = require("../config/prisma");
 const emailService = require("../services/email.service");
+const crypto = require("crypto");
 
 exports.addMember = async (req, res, next) => {
     try {
@@ -43,50 +44,40 @@ exports.addMember = async (req, res, next) => {
             }
         }
 
-        if (!user) {
-            // New User Logic: Default Password = Room Title
-            const defaultPassword = room.title;
-            const bcrypt = require("bcryptjs");
-            const hashedPassword = await bcrypt.hash(defaultPassword, 10);
+        if (user) {
+            // Check if already member
+            const existingMember = await prisma.roomMember.findUnique({
+                where: {
+                    roomId_userId: {
+                        roomId: parseInt(roomId),
+                        userId: user.id
+                    }
+                }
+            });
 
+            if (existingMember) {
+                return res.status(409).json({ message: "User is already a member" });
+            }
+        }
+
+        const inviteToken = crypto.randomBytes(32).toString("hex");
+
+        if (!user) {
             user = await prisma.user.create({
                 data: {
                     name: req.body.name || "Roommate",
                     email,
-                    passwordHash: hashedPassword,
+                    passwordHash: null,
                     role: "MEMBER",
-                    isActive: true
+                    inviteToken,
+                    isActive: false
                 }
             });
-
-
-            // Add to room
-            await prisma.roomMember.create({
-                data: {
-                    roomId: parseInt(roomId),
-                    userId: user.id,
-                    paymentStatus: "UNPAID"
-                }
+        } else {
+            await prisma.user.update({
+                where: { id: user.id },
+                data: { inviteToken }
             });
-
-            // Send Welcome Email with credentials
-            await emailService.sendWelcomeEmail(email, room.title, adminName, email, defaultPassword);
-
-            return res.status(201).json({ message: "User created and added. Welcome email sent with default password." });
-        }
-
-        // Check if already member
-        const existingMember = await prisma.roomMember.findUnique({
-            where: {
-                roomId_userId: {
-                    roomId: parseInt(roomId),
-                    userId: user.id
-                }
-            }
-        });
-
-        if (existingMember) {
-            return res.status(409).json({ message: "User is already a member" });
         }
 
         await prisma.roomMember.create({
@@ -97,10 +88,10 @@ exports.addMember = async (req, res, next) => {
             }
         });
 
-        // Send Welcome Email (Existing User)
-        await emailService.sendWelcomeEmail(email, room.title, adminName, email, null); // No password for existing
+        // Send Invite Email
+        await emailService.sendInviteEmail(email, room.title, adminName, inviteToken);
 
-        return res.status(201).json({ message: "Member added to room. Welcome email sent." });
+        return res.status(201).json({ message: "Member added. Invite email sent." });
     } catch (err) {
         next(err);
     }
@@ -165,21 +156,33 @@ exports.markPaid = async (req, res, next) => {
         });
 
         if (unpaidMembers === 0) {
+            const existingActive = await prisma.expenseCycle.findFirst({
+                where: { roomId: parseInt(roomId), isClosed: false }
+            });
 
+            const tx = [];
 
-            await prisma.$transaction([
-                prisma.expenseCycle.create({
-                    data: {
-                        roomId: parseInt(roomId),
-                        totalAmount: 0,
-                        isClosed: false
-                    }
-                }),
+            if (!existingActive) {
+                tx.push(
+                    prisma.expenseCycle.create({
+                        data: {
+                            roomId: parseInt(roomId),
+                            totalAmount: 0,
+                            isClosed: false,
+                            isFrozen: false
+                        }
+                    })
+                );
+            }
+
+            tx.push(
                 prisma.roomMember.updateMany({
                     where: { roomId: parseInt(roomId) },
                     data: { paymentStatus: "UNPAID" }
                 })
-            ]);
+            );
+
+            await prisma.$transaction(tx);
 
             return res.status(200).json({ message: "Payment updated. All paid -> New cycle started!" });
         }

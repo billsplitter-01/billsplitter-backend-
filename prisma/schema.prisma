@@ -92,6 +92,7 @@ model ExpenseCycle {
   
   @@index([roomId])
   isClosed      Boolean   @default(false)
+  isFrozen      Boolean   @default(false)
 
   room          Room      @relation(fields: [roomId], references: [id])
   expenses      Expense[]

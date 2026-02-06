@@ -1,6 +1,7 @@
 const prisma = require("../config/prisma");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
 const { registerSchema, loginSchema } = require("../validators/auth.validator");
 
 exports.register = async (req, res, next) => {
@@ -38,8 +39,12 @@ exports.register = async (req, res, next) => {
 
         const hashedPassword = await bcrypt.hash(password, 10);
 
-        const role =
+        let role =
             email === "vamshipotharaveni123@gmail.com" ? "APP_ADMIN" : "MEMBER";
+
+        if (roomName && role === "MEMBER") {
+            role = "ROOM_ADMIN";
+        }
 
         const user = await prisma.user.create({
             data: {
@@ -52,7 +57,7 @@ exports.register = async (req, res, next) => {
 
         // Create Room if roomName provided
         if (roomName) {
-            await prisma.room.create({
+            const room = await prisma.room.create({
                 data: {
                     title: roomName,
                     threshold: 1000, // Default
@@ -63,6 +68,15 @@ exports.register = async (req, res, next) => {
                             paymentStatus: "UNPAID"
                         }
                     }
+                }
+            });
+
+            await prisma.expenseCycle.create({
+                data: {
+                    roomId: room.id,
+                    totalAmount: 0,
+                    isClosed: false,
+                    isFrozen: false
                 }
             });
 
@@ -176,6 +190,7 @@ exports.acceptInvite = async (req, res, next) => {
     try {
         const { token, password, name } = req.body;
         if (!token || !password) return res.status(400).json({ message: "Token and password required" });
+        if (password.length < 8) return res.status(400).json({ message: "Password must be at least 8 characters" });
 
         const user = await prisma.user.findUnique({ where: { inviteToken: token } });
         if (!user) return res.status(404).json({ message: "Invalid or expired invite token" });
@@ -200,6 +215,31 @@ exports.acceptInvite = async (req, res, next) => {
             { expiresIn: process.env.JWT_EXPIRES_IN }
         );
 
+        // Send Welcome Email
+        try {
+            const emailService = require("../services/email.service");
+            // We need roomName. Let's fetch the room they belong to.
+            const membership = await prisma.roomMember.findFirst({
+                where: { userId: user.id },
+                include: { room: true }
+            });
+
+            if (membership) {
+                // Find Admin name for the room
+                const roomAdmin = await prisma.user.findUnique({ where: { id: membership.room.adminId } });
+                await emailService.sendWelcomeEmail(
+                    user.email,
+                    membership.room.title,
+                    roomAdmin ? roomAdmin.name : "Admin",
+                    user.email,
+                    null // Password not needed as they just set it
+                );
+            }
+        } catch (emailErr) {
+            console.error("Welcome email failed:", emailErr);
+            // Don't block registration if email fails
+        }
+
         return res.status(200).json({
             message: "Account activated successfully",
             token: jwtToken,
@@ -211,28 +251,74 @@ exports.acceptInvite = async (req, res, next) => {
     }
 };
 
+
 exports.forgotPassword = async (req, res, next) => {
     try {
         const { email } = req.body;
         if (!email) return res.status(400).json({ message: "Email is required" });
 
         const user = await prisma.user.findUnique({ where: { email } });
-        if (!user) return res.status(400).json({ message: "this mail not registed" });
+        if (!user) {
+            return res.status(200).json({ message: "If the email exists, a reset link was sent." });
+        }
 
-        // Generate a random 10-character alphanumeric password
-        const tempPassword = Math.random().toString(36).slice(-10);
-        const hashedPassword = await bcrypt.hash(tempPassword, 10);
-
-        await prisma.user.update({
-            where: { id: user.id },
-            data: { passwordHash: hashedPassword }
+        // Invalidate previous tokens
+        await prisma.passwordResetToken.deleteMany({
+            where: { userId: user.id }
         });
 
-        // Use the email service to send the password
-        const emailService = require("../services/email.service");
-        await emailService.sendPasswordRecoveryEmail(email, tempPassword, user.name);
+        const token = crypto.randomBytes(32).toString("hex");
+        const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
 
-        return res.status(200).json({ message: "sent password to your mail" });
+        await prisma.passwordResetToken.create({
+            data: {
+                userId: user.id,
+                token,
+                expiresAt
+            }
+        });
+
+        const emailService = require("../services/email.service");
+        await emailService.sendPasswordResetEmail(email, token, user.name);
+
+        return res.status(200).json({ message: "If the email exists, a reset link was sent." });
+    } catch (err) {
+        next(err);
+    }
+};
+
+exports.resetPassword = async (req, res, next) => {
+    try {
+        const { token, newPassword } = req.body;
+        if (!token || !newPassword) {
+            return res.status(400).json({ message: "Token and new password are required" });
+        }
+
+        if (newPassword.length < 8) {
+            return res.status(400).json({ message: "Password must be at least 8 characters" });
+        }
+
+        const resetToken = await prisma.passwordResetToken.findUnique({
+            where: { token }
+        });
+
+        if (!resetToken || resetToken.expiresAt < new Date()) {
+            return res.status(400).json({ message: "Invalid or expired reset token" });
+        }
+
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+        await prisma.$transaction([
+            prisma.user.update({
+                where: { id: resetToken.userId },
+                data: { passwordHash: hashedPassword }
+            }),
+            prisma.passwordResetToken.deleteMany({
+                where: { userId: resetToken.userId }
+            })
+        ]);
+
+        return res.status(200).json({ message: "Password updated successfully" });
     } catch (err) {
         next(err);
     }

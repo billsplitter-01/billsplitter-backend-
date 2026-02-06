@@ -16,34 +16,48 @@ exports.addExpense = async (req, res, next) => {
 
         let activeCycle = room.cycles[0];
 
-        // If no active cycle, create one
+        const numericAmount = Number(amount);
+        if (!itemName || !category || !numericAmount || numericAmount <= 0) {
+            return res.status(400).json({ message: "Item name, category, and positive amount are required" });
+        }
+
+        // If no active cycle, allow only if all members are paid
         if (!activeCycle) {
+            const unpaidMembers = await prisma.roomMember.count({
+                where: { roomId: room.id, paymentStatus: "UNPAID" }
+            });
+            if (unpaidMembers > 0) {
+                return res.status(400).json({ message: "All members must be paid before starting a new cycle." });
+            }
+
             activeCycle = await prisma.expenseCycle.create({
                 data: {
                     roomId: room.id,
-                    totalAmount: 0
+                    totalAmount: 0,
+                    isFrozen: false,
+                    isClosed: false
                 }
             });
         }
 
         // Check if frozen/crossed already
-        if (activeCycle.totalAmount >= room.threshold) {
+        if (activeCycle.isFrozen || activeCycle.totalAmount >= room.threshold) {
             return res.status(400).json({ message: "Cycle threshold crossed. Please close the cycle first." });
         }
 
         // Add expense in transaction
-        const newAmount = activeCycle.totalAmount + amount;
+        const newAmount = activeCycle.totalAmount + numericAmount;
 
         // Logic: If newAmount >= threshold, we treat it as crossed.
         const crossed = newAmount >= room.threshold;
 
-        const [expense, updatedCycle] = await prisma.$transaction([
+        const [expense] = await prisma.$transaction([
             prisma.expense.create({
                 data: {
                     roomId: room.id,
                     cycleId: activeCycle.id,
                     itemName,
-                    amount,
+                    amount: numericAmount,
                     category,
                     addedById: adminId,
                     createdAt: date ? new Date(date) : undefined
@@ -51,7 +65,7 @@ exports.addExpense = async (req, res, next) => {
             }),
             prisma.expenseCycle.update({
                 where: { id: activeCycle.id },
-                data: { totalAmount: newAmount }
+                data: { totalAmount: newAmount, isFrozen: crossed ? true : undefined }
             })
         ]);
 

@@ -2,10 +2,8 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const emailService = require('../services/email.service');
 
-// Hardcoded super admin credentials for demo
-// In production, this should be in env or a separate Admin table
-const ADMIN_EMAIL = 'superadmin@splitapp.com';
-const ADMIN_PASSWORD = 'supersecretpassword';
+const ADMIN_EMAIL = process.env.SUPER_ADMIN_EMAIL;
+const ADMIN_PASSWORD = process.env.SUPER_ADMIN_PASSWORD;
 
 exports.broadcastEmail = async (req, res) => {
     const { subject, message } = req.body;
@@ -34,6 +32,10 @@ const jwt = require('jsonwebtoken');
 
 exports.superAdminLogin = async (req, res) => {
     const { email, password } = req.body;
+
+    if (!ADMIN_EMAIL || !ADMIN_PASSWORD) {
+        return res.status(500).json({ message: 'Super Admin credentials not configured' });
+    }
 
     if (email === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
         // Generate a real JWT for the super admin

@@ -6,6 +6,7 @@ require("dotenv").config();
 const authRoutes = require("./routes/auth.routes");
 const compression = require("compression");
 const helmet = require("helmet");
+const rateLimit = require("express-rate-limit");
 
 const numCPUs = os.cpus().length;
 
@@ -28,7 +29,22 @@ if (cluster.isPrimary) {
 
     app.use(helmet());
     app.use(compression());
-    app.use(cors());
+    const allowedOrigins = (process.env.CORS_ORIGINS || process.env.FRONTEND_URL || "")
+        .split(",")
+        .map((o) => o.trim())
+        .filter(Boolean);
+
+    app.use(
+        cors({
+            origin: (origin, callback) => {
+                if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+                    return callback(null, true);
+                }
+                return callback(new Error("Not allowed by CORS"));
+            },
+            credentials: true
+        })
+    );
     app.use(express.json());
 
     app.use((req, res, next) => {
@@ -41,8 +57,15 @@ if (cluster.isPrimary) {
         res.send(`OK from worker ${process.pid}`);
     });
 
+    const authLimiter = rateLimit({
+        windowMs: 10 * 60 * 1000,
+        max: 100,
+        standardHeaders: true,
+        legacyHeaders: false
+    });
+
     // Routes
-    app.use("/api/auth", authRoutes);
+    app.use("/api/auth", authLimiter, authRoutes);
     app.use("/api/rooms", require("./routes/room.routes"));
     app.use("/api/admin", require("./routes/admin.routes"));
     app.use("/api/users", require("./routes/user.routes"));

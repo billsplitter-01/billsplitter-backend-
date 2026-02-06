@@ -5,7 +5,7 @@ const prisma = new PrismaClient();
 exports.submitFeedback = async (req, res) => {
     try {
         const { type, title, description, roomId } = req.body;
-        const userId = req.user.id; // Assumes auth middleware populates req.user
+        const userId = req.user.userId;
 
         if (!type || !title || !description) {
             return res.status(400).json({ message: "All fields are required" });
@@ -21,6 +21,17 @@ exports.submitFeedback = async (req, res) => {
                 status: 'OPEN'
             }
         });
+
+        // Send Feedback Confirmation Email
+        try {
+            const emailService = require("../services/email.service");
+            const user = await prisma.user.findUnique({ where: { id: userId } });
+            if (user && user.email) {
+                await emailService.sendFeedbackConfirmationEmail(user.email, user.name, title);
+            }
+        } catch (emailErr) {
+            console.error("Feedback email failed:", emailErr);
+        }
 
         res.status(201).json({ message: "Feedback submitted successfully", feedback });
     } catch (error) {

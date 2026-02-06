@@ -1,15 +1,10 @@
-const nodemailer = require("nodemailer");
+const sgMail = require("@sendgrid/mail");
 
-// Transport Configuration for Production
-const transporter = nodemailer.createTransport({
-    host: "smtp.gmail.com",
-    port: 465,
-    secure: true, // true for 465, false for other ports
-    auth: {
-        user: process.env.EMAIL_USER || "billspliting@gmail.com",
-        pass: process.env.EMAIL_PASSWORD || process.env.EMAIL_PASS
-    }
-});
+// Configure SendGrid with API Key
+sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+
+const getFrontendUrl = () =>
+    (process.env.FRONTEND_URL || "http://localhost:5173").replace(/\/+$/, "");
 
 /**
  * Generates a professional HTML email template.
@@ -99,7 +94,7 @@ exports.sendManualEmail = async (to, roomName, subject, content, adminName) => {
 
 exports.sendInviteEmail = async (to, roomName, adminName, inviteToken) => {
     const subject = `You're invited to join ${roomName} on SplitApp`;
-    const link = `https://billssplitter-vivasvan.netlify.app/accept-invite?token=${inviteToken}`;
+    const link = `${getFrontendUrl()}/accept-invite?token=${inviteToken}`;
 
     const body = `
         <h2>Join Your Roommates! 👋</h2>
@@ -145,7 +140,7 @@ exports.sendWelcomeEmail = async (to, roomName, adminName, email, password) => {
         <p>You can now log in to view expenses and settle up.</p>
         
         <div style="text-align: center;">
-            <a href="https://billssplitter-vivasvan.netlify.app/login" class="button">Login to Dashboard</a>
+            <a href="${getFrontendUrl()}/login" class="button">Login to Dashboard</a>
         </div>
 
         <p>Best Regards,<br><strong>SplitApp Team</strong></p>
@@ -155,54 +150,79 @@ exports.sendWelcomeEmail = async (to, roomName, adminName, email, password) => {
     await this.sendEmail(to, subject, null, html);
 };
 
-exports.sendPasswordRecoveryEmail = async (to, password, userName) => {
-    const subject = "SplitApp - Password Recovery";
+exports.sendPasswordResetEmail = async (to, resetToken, userName) => {
+    const subject = "SplitApp - Reset Your Password";
+    const resetLink = `${getFrontendUrl()}/reset-password?token=${resetToken}`;
 
     const body = `
-        <h2>Secure Password Recovery 🔐</h2>
+        <h2>Reset Your Password 🔐</h2>
         <p>Hello ${userName || 'User'},</p>
-        <p>You recently requested to recover your password for your SplitApp account.</p>
-        
-        <div class="info-box">
-            <h3 style="margin-top:0; margin-bottom:10px; font-size: 16px;">New Temporary Password</h3>
-            <p style="margin:0;"><strong>Temporary Password:</strong> <span style="font-family: monospace; font-size: 18px; color: #1e293b; background: #f1f5f9; padding: 2px 6px; border-radius: 4px;">${password}</span></p>
-        </div>
-        
-        <p>For your security, please log in using this password and **change it immediately** in your profile settings.</p>
+        <p>We received a request to reset your SplitApp password. Click the button below to set a new password.</p>
         
         <div style="text-align: center;">
-            <a href="https://billssplitter-vivasvan.netlify.app/login" class="button">Login to Dashboard</a>
+            <a href="${resetLink}" class="button">Reset Password</a>
         </div>
 
-        <p>If you did not request this, please ignore this email or contact support if you have concerns.</p>
+        <p style="font-size: 12px; margin-top: 20px; color: #94a3b8;">If the button doesn't work, copy and paste this link: <br> ${resetLink}</p>
+        
+        <p>If you did not request this, you can safely ignore this email.</p>
         
         <p>Best Regards,<br><strong>SplitApp Team</strong></p>
     `;
 
-    const html = getHtmlTemplate("Password Recovery", body, "#3B82F6"); // Blue accent
+    const html = getHtmlTemplate("Password Reset", body, "#3B82F6");
     await this.sendEmail(to, subject, null, html);
 };
 
+exports.sendFeedbackConfirmationEmail = async (to, userName, feedbackTitle) => {
+    const subject = `Feedback Received: ${feedbackTitle}`;
+
+    const body = `
+        <h2>Feedback Received! 🛡️</h2>
+        <p>Hello ${userName || 'User'},</p>
+        <p>Thank you for your feedback regarding <strong>"${feedbackTitle}"</strong>.</p>
+        <p>Our team has received your submission and will look into it shortly. We appreciate your contribution to making SplitApp better!</p>
+        
+        <div class="info-box">
+            <p style="margin:0;">We aim to resolve or respond to all feedback as quickly as possible.</p>
+        </div>
+
+        <p>Best Regards,<br><strong>SplitApp Team</strong></p>
+    `;
+
+    const html = getHtmlTemplate("Feedback Received", body, "#3B82F6");
+    await this.sendEmail(to, subject, null, html);
+};
+
+
 exports.sendEmail = async (to, subject, text, html) => {
     try {
-        const mailOptions = {
-            from: `"SplitApp Notifications" <${process.env.EMAIL_USER || "billspliting@gmail.com"}>`,
-            to,
-            subject,
-            text, // Fallback for clients incapable of rendering HTML
-            html
+        const msg = {
+            to: to,
+            from: process.env.EMAIL_FROM || process.env.EMAIL_USER || "billspliting@gmail.com",
+            subject: subject,
+            text: text || "Please view this email in an HTML-compatible client.", // Fallback for clients incapable of rendering HTML
+            html: html
         };
 
-        // In dev, if no password, we check for mock env but since we have credentials now, 
-        // we might want strict sending. However, let's keep the safety check just in case env didn't load.
-        if (!process.env.EMAIL_PASSWORD && !process.env.MockEmail) {
-            console.log("No Email Password configured and MockEmail not set. Skipping email.");
+        if (process.env.MockEmail) {
+            console.log("--- Mock Email Sent ---");
+            console.log("To:", to);
+            console.log("Subject:", subject);
+            console.log("-----------------------");
             return;
         }
 
-        await transporter.sendMail(mailOptions);
-        // console.log(`Email sent to ${to}`); // Kept commented out as requested to remove logs
+        console.log("SENDGRID KEY EXISTS:", !!process.env.SENDGRID_API_KEY);
+
+        if (!process.env.SENDGRID_API_KEY) {
+            console.log("No SendGrid API Key configured. Skipping email.");
+            return;
+        }
+
+        await sgMail.send(msg);
+        console.log("EMAIL SENT SUCCESSFULLY");
     } catch (err) {
-        console.error("Email sending failed:", err);
+        console.error("SENDGRID ERROR:", err.response?.body || err);
     }
 };

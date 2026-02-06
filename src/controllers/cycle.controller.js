@@ -19,25 +19,22 @@ exports.closeCycle = async (req, res, next) => {
             return res.status(400).json({ message: "No active cycle to close" });
         }
 
-        // Transaction to close cycle and start a new one
+        if (!activeCycle.isFrozen && activeCycle.totalAmount < room.threshold) {
+            return res.status(400).json({ message: "Threshold not reached. You can close only after the cycle is frozen." });
+        }
+
+        // Transaction to close cycle (new cycle starts only after all paid)
         const updates = [
             prisma.expenseCycle.update({
                 where: { id: activeCycle.id },
                 data: {
                     isClosed: true,
+                    isFrozen: true,
                     closedAt: new Date()
-                }
-            }),
-            prisma.expenseCycle.create({
-                data: {
-                    roomId: parseInt(roomId),
-                    totalAmount: 0,
-                    isClosed: false
                 }
             })
         ];
 
-        // Only reset payments if it's a MONTHLY closure
         if (type === 'MONTHLY') {
             updates.push(
                 prisma.roomMember.updateMany({
@@ -50,15 +47,8 @@ exports.closeCycle = async (req, res, next) => {
         await prisma.$transaction(updates);
 
         return res.status(200).json({
-            message: type === 'MONTHLY'
-                ? "Month closed. All payments reset."
-                : "Expense cycle closed. Payments maintained."
+            message: "Cycle closed. Waiting for payments."
         });
-
-        // Notify members? (Phase 9)
-
-
-        return res.status(200).json({ message: "Cycle closed. Waiting for payments." });
     } catch (err) {
         next(err);
     }

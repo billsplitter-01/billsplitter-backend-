@@ -50,6 +50,15 @@ exports.createRoom = async (req, res, next) => {
             },
         });
 
+        await prisma.expenseCycle.create({
+            data: {
+                roomId: room.id,
+                totalAmount: 0,
+                isClosed: false,
+                isFrozen: false
+            }
+        });
+
         return res.status(201).json({ message: "Room created successfully", roomId: room.id });
     } catch (err) {
         next(err);
