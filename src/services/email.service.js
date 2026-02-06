@@ -4,7 +4,7 @@ const sgMail = require("@sendgrid/mail");
 sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
 const getFrontendUrl = () =>
-    (process.env.FRONTEND_URL || "http://localhost:5173").replace(/\/+$/, "");
+    (process.env.FRONTEND_URL || "https://billsplitter-one.vercel.app").replace(/\/+$/, "");
 
 /**
  * Generates a professional HTML email template.
